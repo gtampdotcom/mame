@@ -324,8 +324,8 @@ void network_adapter_base::set_status(uint8_t byte)
 
 void network_adapter_base::get_status(uint8_t byte)
 {
-	if (byte == 0x01) {
-		transmit_byte(bool(m_config->read() & 1) ? 0x9F : 0x1F);
+	if (byte == 0x01 || byte == 0x1E) {
+		transmit_byte((m_config->read() & 1) ? 0x9F : 0x1F);
 	}
 	transmit_byte(0x10);
 	transmit_byte(0xE1);
