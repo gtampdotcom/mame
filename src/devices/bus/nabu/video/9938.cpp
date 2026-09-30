@@ -26,7 +26,7 @@ void tms9938_card_device::device_add_mconfig(machine_config &config)
 	// Video hardware
 	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
 
-	V9938(config, m_v9938, 10.738635_MHz_XTAL);
+	V9938(config, m_v9938, 21.477272_MHz_XTAL);
 	m_v9938->set_screen(m_screen);
 	m_v9938->set_vram_size(0x4000);
 	m_v9938->int_cb().set(*m_slot, FUNC(video_port_device::int_w));
