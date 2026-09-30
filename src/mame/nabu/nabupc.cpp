@@ -15,16 +15,13 @@
 #include "bus/rs232/rs232.h"
 #include "machine/clock.h"
 #include "emuopts.h"
+#include "imagedev/snapquik.h"
 
 #include "nabupc.lh"
 
 #define HCCA_TAG "hcca"
 
 static INPUT_PORTS_START( nabupc )
-	PORT_START("CONFIG")
-	PORT_CONFNAME( 0x03, 0x02, "BIOS Size" )
-	PORT_CONFSETTING( 0x02, "4k BIOS" )
-	PORT_CONFSETTING( 0x01, "8k BIOS" )
 INPUT_PORTS_END
 
 static DEVICE_INPUT_DEFAULTS_START ( hcca_rs232_defaults )
@@ -189,7 +186,6 @@ nabupc_state::nabupc_state(const machine_config &mconfig, device_type type, cons
 	, m_ram(*this, RAM_TAG)
 	, m_centronics(*this, "centronics")
 	, m_bus(*this, "bus")
-	, m_bios_sel(*this, "CONFIG")
 	, m_leds(*this, "led%u", 0U)
 	, m_irq_in_prio(0xFF)
 	, m_int_lines(0)
@@ -216,6 +212,10 @@ void nabupc_state::nabupc(machine_config &config)
 	// Video hardware
 	NABU_VIDEO_PORT(config, m_video_card, bus::nabu::video_card_devices, "tms9918a");
 	m_video_card->int_callback().set(*this, FUNC(nabupc_state::vdp_int_w));
+
+	// Load a boot segment (000001.nabu) straight into RAM, skipping the IPL and the network
+	quickload_image_device &quickload(QUICKLOAD(config, "quickload", "nabu", attotime::from_msec(1)));
+	quickload.set_load_callback(FUNC(nabupc_state::quickload_cb));
 
 	// Sound hardware
 	SPEAKER(config, m_speaker).front_center();
@@ -289,7 +289,8 @@ void nabupc_state::machine_reset()
 	m_porta = 0;
 	m_portb = 0;
 	m_control = 0;
-	m_bios_size = m_bios_sel->read() == 1 ? 0x2000 : 0x1000;
+	// The size follows the selected BIOS: revb and ver29 are 8k images (system_bios() is 1-based).
+	m_bios_size = (system_bios() == 4 || system_bios() == 5) ? 0x2000 : 0x1000;
 	m_leds[0] = 1; // Power LED
 }
 
@@ -416,8 +417,61 @@ void nabupc_state::update_irq()
 	m_maincpu->set_input_line(INPUT_LINE_IRQ0, !((out >> 4) & 1));
 }
 
+// Boot a segment the way the IPL leaves things once it has loaded pack 000001: the
+// payload at 0x140D, the ROM banked out, the keyboard UART configured, the PSG mixer
+// set, interrupts disabled, then entry at 0x1410 (the first three bytes are a header).
+image_init_result nabupc_state::quickload_cb(device_image_interface &image)
+{
+	constexpr offs_t LOAD_ADDRESS = 0x140d;
+	constexpr offs_t ENTRY_ADDRESS = 0x1410;
+
+	const uint64_t size = image.length();
+	if (size <= (ENTRY_ADDRESS - LOAD_ADDRESS) || size > 0x10000 - 0x1000 - LOAD_ADDRESS) {
+		image.seterror(image_error::INVALIDIMAGE, "Segment must be larger than its header and fit below the stack");
+		return image_init_result::FAIL;
+	}
+
+	std::vector<uint8_t> data(size);
+	if (image.fread(&data[0], size) != size) {
+		image.seterror(image_error::UNSPECIFIED, "Error reading the segment");
+		return image_init_result::FAIL;
+	}
+
+	for (size_t i = 0; i < data.size(); ++i) {
+		m_ram->write(LOAD_ADDRESS + i, data[i]);
+	}
+
+	// ROM out, LEDs off
+	control_w(0x03);
+
+	// keyboard UART: reset, then 8N1 x16 with the receiver enabled
+	for (int i = 0; i < 5; ++i) {
+		m_kbduart->write(1, 0x00);
+	}
+	m_kbduart->write(1, 0x40);
+	m_kbduart->write(1, 0x4e);
+	m_kbduart->write(1, 0x04);
+
+	// PSG: all tone and noise off, port A output, port B input
+	m_ay8910->address_w(7);
+	m_ay8910->data_w(0x7f);
+
+	m_maincpu->set_state_int(Z80_IFF1, 0);
+	m_maincpu->set_state_int(Z80_IFF2, 0);
+	m_maincpu->set_state_int(Z80_IM, 0);
+	m_maincpu->set_state_int(Z80_SP, 0xffee);
+	m_maincpu->set_pc(ENTRY_ADDRESS);
+
+	return image_init_result::PASS;
+}
+
 uint8_t nabupc_state::read_mem(offs_t offset)
 {
+	// a card in the Z80 socket (RomWBW) can take over the memory bus
+	uint8_t data;
+	if (m_bus->mem_read(offset, data)) {
+		return data;
+	}
 	if (offset < m_bios_size && (m_control & 1) == 0) {
 		uint8_t *rom = memregion("ipl")->base();
 		return rom[offset];
@@ -425,15 +479,36 @@ uint8_t nabupc_state::read_mem(offs_t offset)
 	return m_ram->read(offset);
 }
 
+void nabupc_state::write_mem(offs_t offset, uint8_t data)
+{
+	if (!m_bus->mem_write(offset, data)) {
+		m_ram->write(offset, data);
+	}
+}
+
+// I/O ports the motherboard does not decode, which a card in the Z80 socket may
+uint8_t nabupc_state::socket_io_r(offs_t offset)
+{
+	uint8_t data = 0xff;
+	m_bus->socket_io_read(offset, data);
+	return data;
+}
+
+void nabupc_state::socket_io_w(offs_t offset, uint8_t data)
+{
+	m_bus->socket_io_write(offset, data);
+}
+
 void nabupc_state::memory_map(address_map &map)
 {
-	map(0x0000, 0xffff).r(FUNC(nabupc_state::read_mem)).w(m_ram, FUNC(ram_device::write));
+	map(0x0000, 0xffff).rw(FUNC(nabupc_state::read_mem), FUNC(nabupc_state::write_mem));
 }
 
 void nabupc_state::io_map(address_map &map)
 {
 	map.unmap_value_high();
 	map.global_mask(0xff);
+	map(0x00, 0xff).rw(FUNC(nabupc_state::socket_io_r), FUNC(nabupc_state::socket_io_w));
 	map(0x00, 0x00).w(FUNC(nabupc_state::control_w));
 	map(0x40, 0x40).r(m_ay8910, FUNC(ay8910_device::data_r));
 	map(0x40, 0x41).w(m_ay8910, FUNC(ay8910_device::data_address_w));

@@ -2,7 +2,7 @@
 #include "video.h"
 
 #include "9918a.h"
-#include "9938.h"
+#include "f18a.h"
 
 DEFINE_DEVICE_TYPE(NABU_VIDEO_PORT, bus::nabu::video_port_device, "nabu_video_port", "NABU PC Video Port")
 
@@ -65,7 +65,9 @@ video_card_interface::video_card_interface(const machine_config &mconfig, device
 void video_card_devices(video_port_device &device)
 {
 	device.option_add("tms9918a", NABU_TMS9918A_CARD);
-	device.option_add("tms9938", NABU_TMS9938_CARD);
+	device.option_add("f18a", NABU_F18A_CARD);
+	device.option_add("pico9918", NABU_PICO9918_CARD);
+	device.option_add("pico9918pro", NABU_PICO9918PRO_CARD);
 }
 
 }

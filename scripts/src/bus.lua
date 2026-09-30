@@ -5093,6 +5093,8 @@ if (BUSES["NABU"]~=null) then
 		MAME_DIR .. "src/devices/bus/nabu/hdd.h",
 		MAME_DIR .. "src/devices/bus/nabu/option.cpp",
 		MAME_DIR .. "src/devices/bus/nabu/option.h",
+		MAME_DIR .. "src/devices/bus/nabu/romwbw.cpp",
+		MAME_DIR .. "src/devices/bus/nabu/romwbw.h",
 	}
 end
 
@@ -5125,8 +5127,21 @@ if (BUSES["NABU_VIDEO"]~=null) then
 		MAME_DIR .. "src/devices/bus/nabu/video/video.h",
 		MAME_DIR .. "src/devices/bus/nabu/video/9918a.cpp",
 		MAME_DIR .. "src/devices/bus/nabu/video/9918a.h",
-		MAME_DIR .. "src/devices/bus/nabu/video/9938.cpp",
-		MAME_DIR .. "src/devices/bus/nabu/video/9938.h",
+		MAME_DIR .. "src/devices/bus/nabu/video/f18a.cpp",
+		MAME_DIR .. "src/devices/bus/nabu/video/f18a.h",
 	}
+	includedirs {
+		MAME_DIR .. "3rdparty/pico9918-core/src",
+		MAME_DIR .. "3rdparty/pico9918-core/src/platform",
+	}
+	defines {
+		"PICO9918_STATIC",
+	}
+	-- pico9918-core's headers test macros that are not always defined
+	configuration { "gmake or ninja" }
+		buildoptions_cpp {
+			"-Wno-error=undef",
+		}
+	configuration { }
 end
 
