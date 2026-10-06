@@ -72,9 +72,9 @@ and saving/loading save states.
 **Delete**
     Clear/reset to default when highlighting an entry on the input
     configuration, cheat options, and plugin options pages.
-**P**
+**F5**
     Pauses the emulated machine.
-**Left Shift+P**
+**Left Shift+F5**
     While paused, advances to next frame. If rewind is enabled, a new rewind
     save state is also captured.
 **Left Shift+~**
