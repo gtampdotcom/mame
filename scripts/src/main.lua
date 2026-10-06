@@ -163,6 +163,7 @@ end
 		ext_lib("zlib"),
 		ext_lib("flac"),
 		ext_lib("utf8proc"),
+		"pico9918core",
 	}
 if (STANDALONE~=true) then
 	links {

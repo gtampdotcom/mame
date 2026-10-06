@@ -2178,6 +2178,49 @@ end
 
 
 --------------------------------------------------
+-- pico9918-core library objects (F18A / PICO9918 VDP)
+--------------------------------------------------
+
+project "pico9918core"
+	uuid "6b0d2a4e-3f1c-4d57-9a68-2c5e8f7a1b93"
+	kind "StaticLib"
+
+	defines {
+		"PICO9918_STATIC",
+	}
+
+	configuration { "gmake or ninja" }
+		buildoptions_c {
+			"-Wno-strict-prototypes",
+			"-Wno-unused-function",
+			"-Wno-undef",
+		}
+
+	configuration { }
+
+	includedirs {
+		MAME_DIR .. "3rdparty/pico9918-core/src",
+		MAME_DIR .. "3rdparty/pico9918-core/src/platform",
+	}
+
+	files {
+		MAME_DIR .. "3rdparty/pico9918-core/src/pico9918.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/pico9918_util.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/pico9918_config.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/pico9918_palette.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/pico9918_frame.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/overlay/splash.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/overlay/diag.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/overlay/bmp_splash.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/overlay/bmp_splash_pro.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/overlay/bmp_font.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/overlay/bmp_f18a_badge.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/gpu/gpu.c",
+		MAME_DIR .. "3rdparty/pico9918-core/src/gpu/tms9900.c",
+	}
+
+
+--------------------------------------------------
 -- wdlfft library objects (from Cockos WDL)
 --------------------------------------------------
 
