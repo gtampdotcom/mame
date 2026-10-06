@@ -63,7 +63,6 @@ private:
 	required_device<ram_device> m_ram;
 	required_device<centronics_device> m_centronics;
 	required_device<bus::nabu::option_bus_device> m_bus;
-	required_ioport m_bios_sel;
 
 	output_finder<4> m_leds;
 

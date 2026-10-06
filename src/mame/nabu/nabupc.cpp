@@ -21,10 +21,6 @@
 #define HCCA_TAG "hcca"
 
 static INPUT_PORTS_START( nabupc )
-	PORT_START("CONFIG")
-	PORT_CONFNAME( 0x03, 0x02, "BIOS Size" )
-	PORT_CONFSETTING( 0x02, "4k BIOS" )
-	PORT_CONFSETTING( 0x01, "8k BIOS" )
 INPUT_PORTS_END
 
 static DEVICE_INPUT_DEFAULTS_START ( hcca_rs232_defaults )
@@ -189,7 +185,6 @@ nabupc_state::nabupc_state(const machine_config &mconfig, device_type type, cons
 	, m_ram(*this, RAM_TAG)
 	, m_centronics(*this, "centronics")
 	, m_bus(*this, "bus")
-	, m_bios_sel(*this, "CONFIG")
 	, m_leds(*this, "led%u", 0U)
 	, m_irq_in_prio(0xFF)
 	, m_int_lines(0)
@@ -289,7 +284,8 @@ void nabupc_state::machine_reset()
 	m_porta = 0;
 	m_portb = 0;
 	m_control = 0;
-	m_bios_size = m_bios_sel->read() == 1 ? 0x2000 : 0x1000;
+	// The size follows the selected BIOS: revb and ver29 are 8k images (system_bios() is 1-based).
+	m_bios_size = (system_bios() == 4 || system_bios() == 5) ? 0x2000 : 0x1000;
 	m_leds[0] = 1; // Power LED
 }
 
