@@ -32,6 +32,8 @@ private:
 	void memory_map(address_map &map);
 	void io_map(address_map &map);
 
+	image_init_result quickload_cb(device_image_interface &image);
+
 	uint8_t read_mem(offs_t offset);
 	void write_mem(offs_t offset, uint8_t data);
 	uint8_t socket_io_r(offs_t offset);

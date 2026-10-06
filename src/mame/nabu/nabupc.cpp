@@ -15,6 +15,7 @@
 #include "bus/rs232/rs232.h"
 #include "machine/clock.h"
 #include "emuopts.h"
+#include "imagedev/snapquik.h"
 
 #include "nabupc.lh"
 
@@ -211,6 +212,10 @@ void nabupc_state::nabupc(machine_config &config)
 	// Video hardware
 	NABU_VIDEO_PORT(config, m_video_card, bus::nabu::video_card_devices, "tms9918a");
 	m_video_card->int_callback().set(*this, FUNC(nabupc_state::vdp_int_w));
+
+	// Load a boot segment (000001.nabu) straight into RAM, skipping the IPL and the network
+	quickload_image_device &quickload(QUICKLOAD(config, "quickload", "nabu", attotime::from_msec(1)));
+	quickload.set_load_callback(FUNC(nabupc_state::quickload_cb));
 
 	// Sound hardware
 	SPEAKER(config, m_speaker).front_center();
@@ -410,6 +415,59 @@ void nabupc_state::update_irq()
 	m_portb |= ((out & 7) << 1);
 	m_portb |= ((out >> 3) & 1);
 	m_maincpu->set_input_line(INPUT_LINE_IRQ0, !((out >> 4) & 1));
+}
+
+// Boot a segment the way the IPL leaves things once it has loaded pack 000001: the
+// payload at 0x140D, the ROM banked out, the keyboard UART configured, the PSG mixer
+// set, interrupts disabled, then entry at 0x1410 (the first three bytes are a header).
+image_init_result nabupc_state::quickload_cb(device_image_interface &image)
+{
+	constexpr offs_t LOAD_ADDRESS = 0x140d;
+	constexpr offs_t ENTRY_ADDRESS = 0x1410;
+
+	const uint64_t size = image.length();
+	// as far as the IPL loads: up to the top of RAM, less the two marker bytes it writes at FFFE/FFFF
+	if (size <= (ENTRY_ADDRESS - LOAD_ADDRESS) || size > 0xfffe - LOAD_ADDRESS) {
+		image.seterror(image_error::INVALIDIMAGE, "Segment must be larger than its header and fit in RAM at 140Dh");
+		return image_init_result::FAIL;
+	}
+
+	std::vector<uint8_t> data(size);
+	if (image.fread(&data[0], size) != size) {
+		image.seterror(image_error::UNSPECIFIED, "Error reading the segment");
+		return image_init_result::FAIL;
+	}
+
+	for (size_t i = 0; i < data.size(); ++i) {
+		m_ram->write(LOAD_ADDRESS + i, data[i]);
+	}
+
+	// the IPL marks a completed load in the last two bytes of RAM
+	m_ram->write(0xfffe, 0xa5);
+	m_ram->write(0xffff, 0x5a);
+
+	// ROM out, LEDs off
+	control_w(0x03);
+
+	// keyboard UART: reset, then 8N1 x16 with the receiver enabled
+	for (int i = 0; i < 5; ++i) {
+		m_kbduart->write(1, 0x00);
+	}
+	m_kbduart->write(1, 0x40);
+	m_kbduart->write(1, 0x4e);
+	m_kbduart->write(1, 0x04);
+
+	// PSG: all tone and noise off, port A output, port B input
+	m_ay8910->address_w(7);
+	m_ay8910->data_w(0x7f);
+
+	m_maincpu->set_state_int(Z80_IFF1, 0);
+	m_maincpu->set_state_int(Z80_IFF2, 0);
+	m_maincpu->set_state_int(Z80_IM, 0);
+	m_maincpu->set_state_int(Z80_SP, 0xffee);
+	m_maincpu->set_pc(ENTRY_ADDRESS);
+
+	return image_init_result::PASS;
 }
 
 uint8_t nabupc_state::read_mem(offs_t offset)
