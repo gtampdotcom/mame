@@ -10,6 +10,7 @@
 #include "adapter.h"
 
 #include "emuopts.h"
+#include "osdfile.h"
 #include "hashing.h"
 #include "unzip.h"
 
@@ -324,8 +325,8 @@ void network_adapter_base::set_status(uint8_t byte)
 
 void network_adapter_base::get_status(uint8_t byte)
 {
-	if (byte == 0x01 || byte == 0x1E) {
-		transmit_byte((m_config->read() & 1) ? 0x9F : 0x1F);
+	if (byte == 0x01) {
+		transmit_byte(bool(m_config->read() & 1) ? 0x9F : 0x1F);
 	}
 	transmit_byte(0x10);
 	transmit_byte(0xE1);
@@ -443,22 +444,177 @@ std::error_condition network_adapter_base::parse_segment(const uint8_t *data, si
 network_adapter_local::network_adapter_local(machine_config const &mconfig, char const *tag, device_t *owner, uint32_t clock)
 	: network_adapter_base(mconfig, NABU_NETWORK_LOCAL_ADAPTER, tag, owner, clock)
 	, device_image_interface(mconfig, *this)
+	, m_loose(false)
 {
+}
+
+void network_adapter_local::device_start()
+{
+	network_adapter_base::device_start();
+
+	save_item(NAME(m_loose));
 }
 
 image_init_result network_adapter_local::call_load()
 {
+	m_segment_length = 0;
+	m_loose = false;
+
 	if (is_filetype("npz")) {
+		return image_init_result::PASS;
+	}
+	if (is_filetype("nabu") || is_filetype("pak")) {
+		m_loose = true;
 		return image_init_result::PASS;
 	}
 	seterror(image_error::INVALIDIMAGE);
 	return image_init_result::FAIL;
 }
 
+void network_adapter_local::call_unload()
+{
+	m_segment_length = 0;
+	m_loose = false;
+}
+
+// Read a bare .nabu segment file into the segment buffer
+std::error_condition network_adapter_local::read_segment_file(const std::string &path, uint8_t type)
+{
+	util::core_file::ptr fd;
+	std::uint64_t length;
+	std::size_t actual;
+
+	std::error_condition err = util::core_file::open(path, OPEN_FLAG_READ, fd);
+	if (!err) {
+		err = fd->length(length);
+	}
+	if (!err && (length == 0 || length > 0x10000)) {
+		err = std::errc::file_too_large;
+	}
+	if (!err) {
+		err = fd->read_at(0, m_segment_data.get(), std::size_t(length), actual);
+	}
+	if (!err && actual != length) {
+		err = std::errc::io_error;
+	}
+
+	m_segment_length = err ? 0 : uint32_t(length);
+	if (!err) {
+		m_segment_type = type;
+	}
+	return err;
+}
+
+// Load a segment when a bare .nabu or .pak file is mounted: the mounted file is the
+// boot segment (000001) whatever it is called, and any other segment is looked up as
+// XXXXXX.pak or XXXXXX.nabu in the same folder.
+std::error_condition network_adapter_local::load_loose_segment(uint32_t segment_id)
+{
+	const std::string path(filename());
+
+	if (segment_id == 0x000001) {
+		return read_segment_file(path, is_filetype("pak") ? segment_type::PAK : segment_type::NABU);
+	}
+
+	const size_t sep = path.find_last_of("/\\");
+	const std::string dir = (sep == std::string::npos) ? std::string() : path.substr(0, sep + 1);
+	const std::string mounted = (sep == std::string::npos) ? path : path.substr(sep + 1);
+
+	std::string found;
+	uint8_t type = segment_type::NABU;
+	if (!find_segment_file(dir, mounted, segment_id, found, type)) {
+		return std::errc::no_such_file_or_directory;
+	}
+	return read_segment_file(dir + found, type);
+}
+
+namespace {
+
+std::string lowercase(std::string s)
+{
+	for (char &c : s) {
+		c = char(std::tolower((unsigned char)c));
+	}
+	return s;
+}
+
+bool ends_with(const std::string &s, const char *suffix)
+{
+	const size_t n = strlen(suffix);
+	return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
+}
+
+// name without its extension and without a trailing 6 digit hex segment number,
+// e.g. "https-cloud.nabu.ca-cycle 1 raw-000001" -> "https-cloud.nabu.ca-cycle 1 raw-"
+std::string segment_prefix(const std::string &lname, size_t ext_len)
+{
+	const std::string stem = lname.substr(0, lname.size() - ext_len);
+	if (stem.size() >= 6 && stem.find_first_not_of("0123456789abcdef", stem.size() - 6) == std::string::npos) {
+		return stem.substr(0, stem.size() - 6);
+	}
+	return std::string();
+}
+
+} // anonymous namespace
+
+// Find the file holding a segment in the folder of the mounted file.  A segment is any
+// .pak or .nabu file whose name ends in its 6 digit hex number, so both plain names
+// (000002.pak) and saved downloads (HTTPS-CLOUD.NABU.CA-CYCLE 1 RAW-000002.PAK) work.
+// Files with the same prefix as the mounted one win, then .pak over .nabu.
+bool network_adapter_local::find_segment_file(const std::string &dir, const std::string &mounted, uint32_t segment_id, std::string &name, uint8_t &type)
+{
+	osd::directory::ptr d = osd::directory::open(dir.empty() ? "." : dir);
+	if (!d) {
+		return false;
+	}
+
+	const std::string wanted = lowercase(util::string_format("%06X", segment_id));
+	const std::string lmounted = lowercase(mounted);
+	const std::string mounted_prefix = segment_prefix(lmounted, ends_with(lmounted, ".nabu") ? 5 : 4);
+
+	int best = -1;
+	while (const osd::directory::entry *e = d->read()) {
+		if (e->type != osd::directory::entry::entry_type::FILE) {
+			continue;
+		}
+
+		const std::string lname = lowercase(e->name);
+		const bool pak = ends_with(lname, ".pak");
+		if (!pak && !ends_with(lname, ".nabu")) {
+			continue;
+		}
+
+		const size_t ext_len = pak ? 4 : 5;
+		const std::string stem = lname.substr(0, lname.size() - ext_len);
+		if (stem.size() < 6 || stem.compare(stem.size() - 6, 6, wanted) != 0) {
+			continue;
+		}
+		// the number must stand alone, not be the tail of a longer one
+		if (stem.size() > 6 && std::isalnum((unsigned char)stem[stem.size() - 7])) {
+			continue;
+		}
+
+		const int score = (segment_prefix(lname, ext_len) == mounted_prefix ? 2 : 0) + (pak ? 1 : 0);
+		if (score > best) {
+			best = score;
+			name = e->name;
+			type = pak ? segment_type::PAK : segment_type::NABU;
+		}
+	}
+	return best >= 0;
+}
+
 // Load Segment from local npz file
 std::error_condition network_adapter_local::load_segment(uint32_t segment_id)
 {
 	segment_id &= 0xFFFFFF;
+
+	if (m_loose) {
+		if ((m_segment_length != 0 && (segment_id == m_segment)) || segment_id == 0x7fffff) {
+			return std::error_condition();
+		}
+		return load_loose_segment(segment_id);
+	}
 
 	util::core_file::ptr proxy;
 	std::error_condition err;

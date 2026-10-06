@@ -163,12 +163,21 @@ public:
 	virtual bool is_creatable() const noexcept override { return false; }
 	virtual bool is_reset_on_load() const noexcept override { return false; }
 	virtual bool core_opens_image_file() const noexcept override { return true; }
-	virtual const char *file_extensions() const noexcept override { return "npz"; }
+	virtual const char *file_extensions() const noexcept override { return "npz,nabu,pak"; }
 	virtual const char *image_type_name() const noexcept override { return "npz_file"; }
 	virtual const char *image_brief_type_name() const noexcept override { return "npz"; }
 	virtual image_init_result call_load() override;
+	virtual void call_unload() override;
 protected:
+	virtual void device_start() override;
 	virtual std::error_condition load_segment(uint32_t segment_id) override;
+private:
+	std::error_condition load_loose_segment(uint32_t segment_id);
+	std::error_condition read_segment_file(const std::string &path, uint8_t type);
+	bool find_segment_file(const std::string &dir, const std::string &mounted, uint32_t segment_id, std::string &name, uint8_t &type);
+
+	// true when a bare .nabu or .pak file is mounted instead of an .npz archive
+	bool m_loose;
 };
 
 /* NABU PC Network Adapter Remote */
