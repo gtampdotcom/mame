@@ -33,6 +33,9 @@ private:
 	void io_map(address_map &map);
 
 	uint8_t read_mem(offs_t offset);
+	void write_mem(offs_t offset, uint8_t data);
+	uint8_t socket_io_r(offs_t offset);
+	void socket_io_w(offs_t offset, uint8_t data);
 
 	uint8_t psg_portb_r();
 	void psg_porta_w(uint8_t data);

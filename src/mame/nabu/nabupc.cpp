@@ -414,6 +414,11 @@ void nabupc_state::update_irq()
 
 uint8_t nabupc_state::read_mem(offs_t offset)
 {
+	// a card in the Z80 socket (RomWBW) can take over the memory bus
+	uint8_t data;
+	if (m_bus->mem_read(offset, data)) {
+		return data;
+	}
 	if (offset < m_bios_size && (m_control & 1) == 0) {
 		uint8_t *rom = memregion("ipl")->base();
 		return rom[offset];
@@ -421,15 +426,36 @@ uint8_t nabupc_state::read_mem(offs_t offset)
 	return m_ram->read(offset);
 }
 
+void nabupc_state::write_mem(offs_t offset, uint8_t data)
+{
+	if (!m_bus->mem_write(offset, data)) {
+		m_ram->write(offset, data);
+	}
+}
+
+// I/O ports the motherboard does not decode, which a card in the Z80 socket may
+uint8_t nabupc_state::socket_io_r(offs_t offset)
+{
+	uint8_t data = 0xff;
+	m_bus->socket_io_read(offset, data);
+	return data;
+}
+
+void nabupc_state::socket_io_w(offs_t offset, uint8_t data)
+{
+	m_bus->socket_io_write(offset, data);
+}
+
 void nabupc_state::memory_map(address_map &map)
 {
-	map(0x0000, 0xffff).r(FUNC(nabupc_state::read_mem)).w(m_ram, FUNC(ram_device::write));
+	map(0x0000, 0xffff).rw(FUNC(nabupc_state::read_mem), FUNC(nabupc_state::write_mem));
 }
 
 void nabupc_state::io_map(address_map &map)
 {
 	map.unmap_value_high();
 	map.global_mask(0xff);
+	map(0x00, 0xff).rw(FUNC(nabupc_state::socket_io_r), FUNC(nabupc_state::socket_io_w));
 	map(0x00, 0x00).w(FUNC(nabupc_state::control_w));
 	map(0x40, 0x40).r(m_ay8910, FUNC(ay8910_device::data_r));
 	map(0x40, 0x41).w(m_ay8910, FUNC(ay8910_device::data_address_w));

@@ -12,6 +12,7 @@
 #include "fdc.h"
 #include "hdd.h"
 #include "rs232.h"
+#include "romwbw.h"
 
 DEFINE_DEVICE_TYPE(NABU_OPTION_BUS_SLOT, bus::nabu::option_slot_device, "nabu_option_slot", "NABU PC Option slot")
 DEFINE_DEVICE_TYPE(NABU_OPTION_BUS, bus::nabu::option_bus_device, "nabu_option_bus", "NABU PC Option Bus")
@@ -96,6 +97,53 @@ void option_bus_device::device_start()
 //-------------------------------------------------
 void option_bus_device::device_reset()
 {
+	m_socket_cards.clear();
+	for (option_slot_device *slot : m_slot_list) {
+		device_option_expansion_interface *const intf(slot->card());
+		if (intf && intf->cpu_socket()) {
+			m_socket_cards.push_back(intf);
+		}
+	}
+}
+
+bool option_bus_device::mem_read(offs_t offset, uint8_t &data)
+{
+	for (device_option_expansion_interface *card : m_socket_cards) {
+		if (card->mem_read(offset, data)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool option_bus_device::mem_write(offs_t offset, uint8_t data)
+{
+	for (device_option_expansion_interface *card : m_socket_cards) {
+		if (card->mem_write(offset, data)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool option_bus_device::socket_io_read(offs_t port, uint8_t &data)
+{
+	for (device_option_expansion_interface *card : m_socket_cards) {
+		if (card->io_read(port, data)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool option_bus_device::socket_io_write(offs_t port, uint8_t data)
+{
+	for (device_option_expansion_interface *card : m_socket_cards) {
+		if (card->io_write(port, data)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 
@@ -131,6 +179,7 @@ void option_bus_devices(device_slot_interface &device)
 	device.option_add("fdc", NABU_OPTION_FDC);
 	device.option_add("hdd", NABU_OPTION_HDD);
 	device.option_add("rs232",  NABU_OPTION_RS232);
+	device.option_add("romwbw", NABU_OPTION_ROMWBW);
 }
 
 }  // namespace bus::nabu
