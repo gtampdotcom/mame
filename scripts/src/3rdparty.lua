@@ -1216,6 +1216,10 @@ project "bimg"
 		buildoptions {
 			"-Wno-unused-but-set-variable",
 		}
+		buildoptions_cpp {
+			-- astc-codec names constructors with template-ids, an error in C++20 on GCC 14+
+			"-Wno-template-id-cdtor",
+		}
 
 	configuration { }
 
